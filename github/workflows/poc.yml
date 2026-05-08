@@ -1,0 +1,17 @@
+name: Vulnerability PoC
+on: [push]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run Exploit Test
+        run: |
+          forge test --match-path test/exploit/SignatureBypass.t.sol -vvv
